@@ -1,14 +1,20 @@
 # Nepali Corpus Scrapers
 
-Scripts to scrape Nepali text from government websites and news sources. Designed for building training corpora for LLM fine-tuning.
+Scripts to scrape Nepali text from 300+ government, news, and social media sources. Designed for building training corpora for LLM fine-tuning.
 
-## What's Included
+## Source Coverage: 300+ Sources
 
-| Script | Sources | Language | Articles/Run |
-|--------|---------|----------|-------------|
-| `govt_scraper.py` | 17 Nepal government ministries | Mixed (EN/NE) | ~200-500 |
-| `news_rss_scraper.py` | 18 RSS news feeds | EN + NE | ~300-600 |
-| `ekantipur_scraper.py` | Ekantipur (7 provinces + national) | Nepali | ~100-300 |
+| Script / Config | Sources | Type | Articles/Run |
+|--------|---------|------|-------------|
+| `news_rss_scraper.py` | 33 RSS feeds (national + 7 provinces) | News | ~500-1000 |
+| `ekantipur_scraper.py` | 8 pages (national + 7 provinces) | News HTML | ~100-300 |
+| `govt_scraper.py` | 17 federal ministries | Government | ~200-500 |
+| `dao_scraper.py` | 77 District Administration Offices | Government | ~500-2000 |
+| `govt_sources_registry.yaml` | 53 govt bodies (constitutional, regulatory, judiciary, security, disaster, parliament, provinces, municipalities) | Config | — |
+| `social_sources.yaml` | 59 Twitter/X accounts + 15 hashtags + 10 searches | Social | — |
+| + HTML-only news | 13 sources (Ratopati 7 provinces, Himalayan Times, Republica, etc.) | Reference | — |
+
+**Total: ~300 unique source configurations** covering national news, provincial news, federal ministries, 77 district offices, constitutional bodies, security agencies, disaster portals, political leaders, journalists, and party accounts.
 
 ## Setup
 
@@ -16,90 +22,97 @@ Scripts to scrape Nepali text from government websites and news sources. Designe
 pip install -r requirements.txt
 ```
 
-## Government Ministry Scraper
+## News RSS Scraper (33 feeds)
 
-Scrapes press releases, notices, circulars, and news from 17 Nepal government ministry websites (mof.gov.np, moest.gov.np, mohp.gov.np, etc.).
+Fetches articles from 33 Nepal news RSS feeds — national English, national Nepali, and all 7 province feeds.
 
 ```bash
-# List all configured ministries
-python govt_scraper.py --list
-
-# Scrape a single ministry
-python govt_scraper.py --ministry mof
-
-# Scrape all ministries, save JSON per ministry
-python govt_scraper.py --all --output data/govt/
-
-# Scrape with more pages (default: 3 pages per endpoint)
-python govt_scraper.py --all --pages 10 --output data/govt/
+python news_rss_scraper.py --list                           # List all feeds
+python news_rss_scraper.py --output data/news/              # Fetch all, save per-source JSON
+python news_rss_scraper.py --language ne --output ne.jsonl --format jsonl  # Nepali only
+python news_rss_scraper.py --language en --output en.jsonl --format jsonl  # English only
+python news_rss_scraper.py --feed setopati                  # Single feed
 ```
 
-**How it works:** Most Nepal govt websites use a common CMS with `/category/press-release/`, `/category/notice/` URL patterns and `/content/{id}/` article links. The scraper auto-detects both category-listing and table-based layouts. Handles Nepali (Bikram Sambat) dates and SSL certificate issues common on .gov.np sites.
+**Sources include:** Kathmandu Post, OnlineKhabar (EN+NE), Setopati, Nagarik News, BBC Nepali, Annapurna Post, Gorkhapatra, Pahilo Post, Khabarhub, Himal Press, AP1 TV, Image Channel, Mero Lagani, plus 7-province OnlineKhabar feeds, Gandak News, Pokhara Hotline, Lumbini Online, Karnali Mission, and more.
 
-**Adding a new ministry:** Edit the `MINISTRIES` dict in `govt_scraper.py`:
+## Ekantipur Scraper (8 pages)
+
+Async HTML scraper for ekantipur.com — Nepal's largest Nepali-language news site. RSS returns 404, so this scrapes HTML directly.
+
+```bash
+python ekantipur_scraper.py                                 # National + all 7 provinces
+python ekantipur_scraper.py --province gandaki              # Single province
+python ekantipur_scraper.py --national                      # National only
+python ekantipur_scraper.py --output corpus.jsonl --format jsonl
+```
+
+## Government Ministry Scraper (17 ministries)
+
+Scrapes press releases, notices, circulars from 17 Nepal federal ministry websites.
+
+```bash
+python govt_scraper.py --list                               # List all ministries
+python govt_scraper.py --ministry mof                       # Single ministry
+python govt_scraper.py --all --output data/govt/            # All ministries
+python govt_scraper.py --all --pages 10 --output data/govt/ # Deep scrape
+```
+
+**How it works:** Most Nepal govt websites use `/category/press-release/` URL patterns and `/content/{id}/` article links. The scraper handles both category-listing and table-based layouts, Nepali (Bikram Sambat) dates, and SSL certificate issues.
+
+**Adding a new ministry:**
 ```python
 MINISTRIES["new_ministry"] = MinistryConfig(
     source_id="new_ministry",
     name="Ministry of XYZ",
     name_ne="XYZ मन्त्रालय",
     base_url="https://moxyz.gov.np",
-    endpoints={
-        "press_release": "/category/press-release/",
-        "notice": "/category/notice/",
-    },
+    endpoints={"press_release": "/category/press-release/", "notice": "/category/notice/"},
 )
 ```
 
-## News RSS Scraper
+## DAO Scraper (77 districts)
 
-Fetches articles from 18 Nepal news RSS feeds — both English and Nepali.
-
-```bash
-# List all feeds
-python news_rss_scraper.py --list
-
-# Fetch all feeds
-python news_rss_scraper.py --output data/news/
-
-# Nepali feeds only (for Devanagari corpus)
-python news_rss_scraper.py --language ne --output data/nepali_news/
-
-# English feeds only
-python news_rss_scraper.py --language en --output data/english_news/
-
-# Single feed
-python news_rss_scraper.py --feed setopati --output data/
-
-# JSONL format (one article per line — good for training)
-python news_rss_scraper.py --output corpus.jsonl --format jsonl
-```
-
-**Sources include:** Kathmandu Post, OnlineKhabar (EN+NE), Setopati, Nagarik News, BBC Nepali, Annapurna Post, Gorkhapatra, Pahilo Post, Khabarhub, and more.
-
-## Ekantipur Scraper
-
-Async HTML scraper for ekantipur.com (Nepal's largest Nepali-language news site). Their RSS returns 404, so this scrapes HTML directly.
+Scrapes all 77 District Administration Offices — these issue curfews, prohibitory orders, and local emergency notifications.
 
 ```bash
-# Scrape national + all 7 provinces
-python ekantipur_scraper.py --output data/ekantipur/
-
-# Single province
-python ekantipur_scraper.py --province gandaki --output data/ekantipur/
-
-# National only
-python ekantipur_scraper.py --national --output data/ekantipur/
-
-# JSONL for training
-python ekantipur_scraper.py --output ekantipur.jsonl --format jsonl
-
-# List provinces
-python ekantipur_scraper.py --list
+python dao_scraper.py --list                                # List all 77 districts by province
+python dao_scraper.py --district kathmandu                  # Single district
+python dao_scraper.py --province Gandaki                    # All districts in a province
+python dao_scraper.py --priority --output data/dao/         # 15 priority districts
+python dao_scraper.py --all --output data/dao/              # All 77 (slow!)
+python dao_scraper.py --district kaski --category notice-ne # Nepali notices
 ```
+
+**URL pattern:** `https://dao{district}.moha.gov.np` (e.g., daokathmandu.moha.gov.np)
+
+## Config Files
+
+### `govt_sources_registry.yaml`
+Complete registry of 53 government sources organized by type:
+- 22 Federal Ministries (OPMCM, MOHA, MOFA, MOF, MOHP, MOD, etc.)
+- 6 Constitutional Bodies (Election Commission, CIAA, Auditor General, PSC, NHRC, NWC)
+- 5 Regulatory Bodies (Nepal Rastra Bank, SEBON, NTA, NERC, CAAN)
+- 2 Judiciary (Supreme Court, Judicial Council)
+- 6 Security Services (Nepal Police, CIB, APF, Nepal Army, NID, Immigration)
+- 3 Disaster Sources (BIPAD Portal, DRR Portal, DHM)
+- 2 Parliament (House of Representatives, National Assembly)
+- 7 Provincial Governments
+- 6 Metropolitan Cities (Kathmandu, Lalitpur, Bharatpur, Pokhara, Biratnagar, Birgunj)
+
+### `social_sources.yaml`
+59 Twitter/X accounts scraped via Nitter (no API needed):
+- 7 Government & Official accounts
+- 26 Political Leaders (all major party leaders)
+- 5 Party Official accounts (RSP, NC, UML, Maoist, RPP)
+- 4 News Media accounts
+- 14 Journalists & Analysts
+- 15 Hashtags (English + Nepali)
+- 10 Text search queries
 
 ## Output Format
 
-All scrapers output JSON with these fields:
+All scrapers output JSON with consistent fields:
 
 ```json
 {
@@ -117,33 +130,38 @@ All scrapers output JSON with these fields:
 
 ## Building a Corpus
 
-Example: scrape everything into JSONL for fine-tuning:
+Scrape everything into JSONL for fine-tuning:
 
 ```bash
 mkdir -p corpus
 
-# Government documents
+# Government ministries (17 sources)
 python govt_scraper.py --all --pages 10 --output corpus/govt/
 
-# News RSS (run daily via cron for fresh articles)
+# District offices (77 districts — run overnight)
+python dao_scraper.py --all --output corpus/dao/
+
+# News RSS (33 feeds)
 python news_rss_scraper.py --output corpus/news.jsonl --format jsonl
 
-# Ekantipur
+# Ekantipur (8 pages)
 python ekantipur_scraper.py --output corpus/ekantipur.jsonl --format jsonl
 ```
 
-Set up a daily cron job to accumulate articles over time:
+Daily cron for accumulating articles:
 ```bash
-# Add to crontab -e
 0 6 * * * cd /path/to/nepali-corpus && python news_rss_scraper.py --output /data/corpus/news_$(date +\%Y\%m\%d).jsonl --format jsonl
+0 7 * * * cd /path/to/nepali-corpus && python ekantipur_scraper.py --output /data/corpus/ekantipur_$(date +\%Y\%m\%d).jsonl --format jsonl
+0 8 * * 0 cd /path/to/nepali-corpus && python dao_scraper.py --priority --output /data/corpus/dao/
 ```
 
 ## Notes
 
-- **Rate limiting:** All scrapers include configurable delays between requests (default 0.5-1s). Be respectful to the servers.
-- **SSL issues:** Nepal govt sites often have expired/invalid SSL certs. The govt scraper disables SSL verification (`verify=False`) — this is expected.
-- **Nepali dates:** Government documents use Bikram Sambat (BS) calendar dates (e.g., 2081-09-15). These are preserved as-is in the `date_bs` field.
-- **Deduplication:** All scrapers deduplicate by URL within a single run. For cross-run dedup, use the `id` or `url` field.
+- **Rate limiting:** All scrapers include configurable delays (0.5-1s). Be respectful.
+- **SSL issues:** Nepal govt sites often have expired SSL certs. Govt/DAO scrapers disable verification.
+- **Nepali dates:** Government documents use Bikram Sambat (BS) dates (e.g., 2081-09-15), preserved as-is.
+- **Deduplication:** All scrapers deduplicate by URL within a run. For cross-run dedup, use `id` or `url`.
+- **Nitter scraping:** Social sources require a working Nitter instance. Instances go down frequently — check `social_sources.yaml` for alternatives.
 
 ## License
 

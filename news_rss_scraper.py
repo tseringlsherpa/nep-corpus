@@ -2,7 +2,7 @@
 """
 Nepal News RSS Feed Scraper
 
-Fetches articles from 30+ Nepali news RSS feeds. Supports both English and
+Fetches articles from 55+ Nepali news RSS feeds (national + 7 provinces). Supports both English and
 Nepali language sources. Outputs structured JSON for corpus building.
 
 Usage:
@@ -169,6 +169,121 @@ FEEDS = {
         "language": "ne",
         "priority": 2,
     },
+
+    # ── Koshi Province ──
+    "koshi_onlinekhabar": {
+        "name": "OnlineKhabar Koshi",
+        "url": "https://www.onlinekhabar.com/content/province/koshi/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+    "biratnagar_ob": {
+        "name": "Our Biratnagar",
+        "url": "https://ourbiratnagar.net/feed/",
+        "language": "ne",
+        "priority": 3,
+    },
+
+    # ── Madhesh Province ──
+    "madhesh_onlinekhabar": {
+        "name": "OnlineKhabar Madhesh",
+        "url": "https://www.onlinekhabar.com/content/province/madhesh/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+    "janakpur_today": {
+        "name": "Janakpur Today",
+        "url": "https://ejanakpurtoday.com/feed/",
+        "language": "ne",
+        "priority": 3,
+    },
+
+    # ── Bagmati Province ──
+    "bagmati_onlinekhabar": {
+        "name": "OnlineKhabar Bagmati",
+        "url": "https://www.onlinekhabar.com/content/province/bagmati/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+    "himalpress_bagmati": {
+        "name": "HimalPress Bagmati",
+        "url": "https://en.himalpress.com/category/province/province-3/feed/",
+        "language": "en",
+        "priority": 3,
+    },
+
+    # ── Gandaki Province ──
+    "gandaki_onlinekhabar": {
+        "name": "OnlineKhabar Gandaki",
+        "url": "https://www.onlinekhabar.com/content/province/gandaki/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+    "gandaknews": {
+        "name": "Gandak News",
+        "url": "https://www.gandaknews.com/feed/",
+        "language": "ne",
+        "priority": 3,
+    },
+    "pokharahotline": {
+        "name": "Pokhara Hotline",
+        "url": "https://pokharahotline.com/feed/",
+        "language": "ne",
+        "priority": 4,
+    },
+
+    # ── Lumbini Province ──
+    "lumbini_onlinekhabar": {
+        "name": "OnlineKhabar Lumbini",
+        "url": "https://www.onlinekhabar.com/content/province/lumbini/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+    "lumbini_online": {
+        "name": "Lumbini Online",
+        "url": "https://www.lumbinionline.com/feed/",
+        "language": "ne",
+        "priority": 3,
+    },
+
+    # ── Karnali Province ──
+    "karnali_onlinekhabar": {
+        "name": "OnlineKhabar Karnali",
+        "url": "https://www.onlinekhabar.com/content/province/karnali/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+    "karnali_mission": {
+        "name": "Karnali Mission",
+        "url": "https://karnalimission.com/feed/",
+        "language": "ne",
+        "priority": 3,
+    },
+
+    # ── Sudurpashchim Province ──
+    "sudurpashchim_onlinekhabar": {
+        "name": "OnlineKhabar Sudurpashchim",
+        "url": "https://www.onlinekhabar.com/content/province/sudurpashchim/feed",
+        "language": "ne",
+        "priority": 3,
+    },
+}
+
+# HTML-only sources (no RSS, need dedicated scrapers — listed here for reference)
+HTML_ONLY_SOURCES = {
+    "himalayan": {"name": "The Himalayan Times", "url": "https://www.thehimalayantimes.com/", "language": "en"},
+    "republica": {"name": "My Republica", "url": "https://myrepublica.nagariknetwork.com/", "language": "en"},
+    "ekantipur": {"name": "eKantipur", "url": "https://ekantipur.com/", "language": "ne", "note": "Use ekantipur_scraper.py"},
+    "ratopati": {"name": "Ratopati", "url": "https://ratopati.com/", "language": "ne"},
+    "nepalitimes": {"name": "Nepali Times", "url": "https://www.nepalitimes.com/", "language": "en"},
+    "kantipurtv": {"name": "Kantipur TV", "url": "https://www.kantipurtv.com/", "language": "ne"},
+    "koshi_ratopati": {"name": "Ratopati Koshi", "url": "https://koshi.ratopati.com/", "language": "ne"},
+    "madhesh_ratopati": {"name": "Ratopati Madhesh", "url": "https://madhesh.ratopati.com/", "language": "ne"},
+    "bagmati_ratopati": {"name": "Ratopati Bagmati", "url": "https://bagmati.ratopati.com/", "language": "ne"},
+    "gandaki_ratopati": {"name": "Ratopati Gandaki", "url": "https://gandaki.ratopati.com/province/4", "language": "ne"},
+    "lumbini_ratopati": {"name": "Ratopati Lumbini", "url": "https://lumbini.ratopati.com/", "language": "ne"},
+    "karnali_ratopati": {"name": "Ratopati Karnali", "url": "https://karnali.ratopati.com/", "language": "ne"},
+    "sudurpashchim_ratopati": {"name": "Ratopati Sudurpashchim", "url": "https://sudurpashchim.ratopati.com/", "language": "ne"},
 }
 
 
