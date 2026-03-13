@@ -66,7 +66,7 @@ class DiscoveryMiner(ScraperBase):
         # 5. Pagination on listing pages discovered so far
         listing_pages = {u for u in reported_urls if self._is_listing_page(u)}
         if listing_pages:
-            pagination_urls = self.discover_from_pagination(listing_pages, max_pages=20)
+            pagination_urls = self.discover_from_pagination(listing_pages, max_pages=max_pages)
             yield from _batch_and_yield(pagination_urls)
 
         # 6. Archive / date-based discovery

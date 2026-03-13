@@ -400,7 +400,7 @@ class ScrapeCoordinator:
                             category="Discovery",
                             scraper_class="miner",
                             is_discovery=True,
-                            func=lambda m=miner_obj: m.discover_all(max_pages=max_pages or 100)
+                            func=lambda m=miner_obj: m.discover_all(max_pages=max_pages or 500)
                         )
                     )
 
@@ -408,7 +408,7 @@ class ScrapeCoordinator:
                 jobs.append(
                     ScrapeJob(
                         name="dao", category="Gov", scraper_class="dao",
-                        func=lambda: dao_scraper.fetch_raw_records(pages=max_pages or 2)
+                        func=lambda: dao_scraper.fetch_raw_records(pages=max_pages or 50)
                     )
                 )
 
@@ -425,7 +425,7 @@ class ScrapeCoordinator:
             jobs.append(
                 ScrapeJob(
                     name="ekantipur", category="News", scraper_class="ekantipur",
-                    func=lambda: ekantipur_scraper.fetch_raw_records(max_pages=max_pages or 3)
+                    func=lambda: ekantipur_scraper.fetch_raw_records(max_pages=max_pages or 500)
                 )
             )
             # 3. Generic HTML sources (thousands)
@@ -438,7 +438,7 @@ class ScrapeCoordinator:
                             category="News",
                             scraper_class="miner",
                             is_discovery=True,
-                            func=lambda c=cfg: miner.DiscoveryMiner(c.url).discover_all(max_pages=max_pages or 2)
+                            func=lambda c=cfg: miner.DiscoveryMiner(c.url).discover_all(max_pages=max_pages or 100)
                         )
                     )
                 else:
@@ -952,22 +952,25 @@ class ScrapeCoordinator:
                     # Use domain profiles if available
                     cleaned = self._boilerplate_detector.clean_document(content, rec.source_id)
                     
-                    if len(cleaned.strip()) >= 100:
-                        from ...utils.normalize import devanagari_ratio
-                        if devanagari_ratio(cleaned) >= 0.3:
+                    if len(cleaned.strip()) >= 200:
+                        from nepali_corpus.core.utils.normalize import devanagari_ratio
+                        ratio = devanagari_ratio(cleaned)
+                        if ratio >= 0.4:
                             doc_id = hashlib.md5(rec.url.encode()).hexdigest()
                             doc = TrainingDocument(
                                 id=doc_id,
                                 url=rec.url,
                                 source_id=rec.source_id,
                                 source_name=rec.source_name,
-                                language=rec.language or "ne",
+                                language="ne",
                                 text=cleaned.strip(),
                                 category=rec.category,
                                 published_at=rec.published_at,
                                 date_bs=rec.raw_meta.get("date_bs") if rec.raw_meta else None,
                             )
                             final_docs.append(doc)
+                        else:
+                            logger.debug("Skipping doc due to low devanagari ratio (%.2f): %s", ratio, rec.url)
             
             if final_docs:
                 await session.store_training_documents(final_docs)
@@ -993,7 +996,7 @@ class ScrapeCoordinator:
         instead of inline logic.
         """
         from nepali_corpus.pipeline.runner import load_raw_jsonl, save_raw_jsonl
-        from ...utils.normalize import devanagari_ratio
+        from nepali_corpus.core.utils.normalize import devanagari_ratio
 
         # Create enrichment job record
         job_id = await session.create_pipeline_job(
