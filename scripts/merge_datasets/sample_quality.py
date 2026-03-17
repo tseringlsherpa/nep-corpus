@@ -10,6 +10,7 @@ import argparse
 import random
 import statistics
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -21,7 +22,11 @@ project_root = str(Path(__file__).resolve().parents[2])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from scripts.merge_datasets.merge_corpus_to_hf import build_legacy_filter_spec, parse_sources
+from scripts.merge_datasets.merge_corpus_to_hf import (
+    build_legacy_filter_spec,
+    parse_sources,
+    get_field_value,
+)
 from scripts.merge_datasets.quality_filters import (
     FilterSpec,
     compute_metrics,
@@ -42,12 +47,27 @@ def fetch_info(dataset: str) -> Dict[str, Any]:
     return resp.json()
 
 
-def fetch_rows(dataset: str, config: str, split: str, offset: int, length: int) -> Dict[str, Any]:
+def fetch_rows(
+    dataset: str,
+    config: str,
+    split: str,
+    offset: int,
+    length: int,
+    max_retries: int = 5,
+    backoff_s: float = 0.5,
+) -> Dict[str, Any]:
     url = (
         "https://datasets-server.huggingface.co/rows?dataset={dataset}"
         "&config={config}&split={split}&offset={offset}&length={length}"
     ).format(dataset=dataset, config=config, split=split, offset=offset, length=length)
-    resp = requests.get(url, timeout=30)
+    for attempt in range(max_retries):
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 429:
+            sleep_s = backoff_s * (2 ** attempt)
+            time.sleep(sleep_s)
+            continue
+        resp.raise_for_status()
+        return resp.json()
     resp.raise_for_status()
     return resp.json()
 
@@ -56,6 +76,7 @@ def sample_texts(
     dataset: str,
     config: str,
     split: str,
+    text_field: Any,
     total_samples: int,
     block_size: int,
     seed: int,
@@ -81,7 +102,8 @@ def sample_texts(
     for start in starts:
         payload = fetch_rows(dataset, config, split, start, block_size)
         for row in payload.get("rows", []):
-            text = row.get("row", {}).get("text")
+            raw_row = row.get("row", {})
+            text = get_field_value(raw_row, text_field)
             if text is None:
                 text = ""
             texts.append(str(text))
@@ -165,10 +187,12 @@ def main() -> None:
             legacy_spec=legacy_filter_spec,
         )
 
+        text_field = source.fields.get("text", "text") if source.fields else "text"
         texts = sample_texts(
             dataset=source.repo,
             config="default",
             split=source.split,
+            text_field=text_field,
             total_samples=args.samples,
             block_size=args.block_size,
             seed=args.seed,
