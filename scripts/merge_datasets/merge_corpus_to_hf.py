@@ -16,12 +16,14 @@ import os
 import re
 import sqlite3
 import sys
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import yaml
 from datasets import Dataset, Features, Value, load_dataset
+import datasets
 from huggingface_hub import HfApi, get_token, login
 
 # Ensure project root is on sys.path for scripts.* imports
@@ -91,6 +93,7 @@ class SourceConfig:
     name: str
     kind: str
     repo: Optional[str] = None
+    config: Optional[str] = None
     split: str = "train"
     path: Optional[str] = None
     fields: Optional[Dict[str, Any]] = None
@@ -147,8 +150,11 @@ class DedupeStore:
         return [(h, row) for h, row in unique_items if h not in existing]
 
 
-def iter_hf_dataset(repo: str, split: str = "train") -> Iterator[Dict[str, Any]]:
-    dataset = load_dataset(repo, split=split, streaming=True)
+def iter_hf_dataset(repo: str, split: str = "train", config: Optional[str] = None) -> Iterator[Dict[str, Any]]:
+    if config:
+        dataset = load_dataset(repo, name=config, split=split, streaming=True)
+    else:
+        dataset = load_dataset(repo, split=split, streaming=True)
     for row in dataset:
         yield row
 
@@ -201,6 +207,36 @@ def iter_jsonl(path: str) -> Iterator[Dict[str, Any]]:
                 continue
 
 
+def load_checkpoint(path: Optional[str]) -> set[str]:
+    if not path or not os.path.exists(path):
+        return set()
+    done: set[str] = set()
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                done.add(line)
+    return done
+
+
+def append_checkpoint(path: Optional[str], key: str) -> None:
+    if not path:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(key + "\n")
+
+
+def checkpoint_key(source: "SourceConfig") -> str:
+    if source.kind == "hf":
+        return f"hf|{source.repo}|{source.config or 'default'}|{source.split}"
+    if source.kind == "jsonl":
+        return f"jsonl|{source.path}"
+    if source.kind == "parquet":
+        return f"parquet|{source.path}"
+    return f"{source.kind}|{source.name}"
+
+
 def iter_parquet(path: str) -> Iterator[Dict[str, Any]]:
     dataset = load_dataset("parquet", data_files=path, split="train", streaming=True)
     for row in dataset:
@@ -244,6 +280,7 @@ def parse_sources(raw_sources: List[Dict[str, Any]]) -> List[SourceConfig]:
                 name=name,
                 kind=kind,
                 repo=raw.get("repo"),
+                config=raw.get("config"),
                 split=raw.get("split", "train"),
                 path=raw.get("path"),
                 fields=raw.get("fields") or {},
@@ -251,6 +288,63 @@ def parse_sources(raw_sources: List[Dict[str, Any]]) -> List[SourceConfig]:
             )
         )
     return sources
+
+
+def load_inventory_sources(
+    inventory_path: str,
+    include_re: Optional[re.Pattern],
+    exclude_re: Optional[re.Pattern],
+) -> List[SourceConfig]:
+    sources: List[SourceConfig] = []
+    with open(inventory_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            repo_id = row.get("repo_id")
+            config = row.get("config") or "default"
+            split = row.get("split") or "train"
+            mapping = row.get("mapping_suggested") or {}
+            usable = row.get("usable", False)
+            if not repo_id or not usable or not mapping.get("text"):
+                continue
+
+            if include_re and not include_re.search(repo_id):
+                continue
+            if exclude_re and exclude_re.search(repo_id):
+                continue
+
+            source_name = repo_id if config == "default" else f"{repo_id}:{config}"
+            sources.append(
+                SourceConfig(
+                    name=source_name,
+                    kind="hf",
+                    repo=repo_id,
+                    config=config,
+                    split=split,
+                    fields={k: v for k, v in mapping.items() if v},
+                    filters=row.get("filters") or None,
+                )
+            )
+    return sources
+
+
+def cleanup_hf_cache(repo_id: str) -> None:
+    cache_root = os.environ.get("HF_DATASETS_CACHE") or datasets.config.HF_DATASETS_CACHE
+    if not cache_root or not os.path.isdir(cache_root):
+        return
+    safe = repo_id.replace("/", "___")
+    for entry in os.listdir(cache_root):
+        if entry.startswith(safe):
+            try:
+                path = os.path.join(cache_root, entry)
+                shutil.rmtree(path, ignore_errors=True)
+            except Exception:
+                continue
 
 
 def map_item_to_schema(
@@ -367,7 +461,7 @@ def iter_source_items(source: SourceConfig) -> Iterator[Dict[str, Any]]:
     if source.kind == "hf":
         if not source.repo:
             raise ValueError(f"HF source missing repo: {source.name}")
-        yield from iter_hf_dataset(source.repo, split=source.split)
+        yield from iter_hf_dataset(source.repo, split=source.split, config=source.config)
     elif source.kind == "jsonl":
         if not source.path:
             raise ValueError(f"JSONL source missing path: {source.name}")
@@ -420,6 +514,8 @@ def merge_and_upload(
     global_filter_spec: Optional[FilterSpec],
     legacy_filter_spec: Optional[FilterSpec],
     default_language: Optional[str],
+    cleanup_cache: bool,
+    checkpoint_path: Optional[str],
 ) -> None:
     api = HfApi()
 
@@ -456,57 +552,67 @@ def merge_and_upload(
         pending: List[Tuple[bytes, Dict[str, Any]]] = []
         uploaded_batches = 0
 
+        done = load_checkpoint(checkpoint_path)
+
         for source in sources:
+            key = checkpoint_key(source)
+            if key in done:
+                logger.info("Skipping already completed source: %s", source.name)
+                continue
             logger.info("Processing source: %s", source.name)
             filter_spec = resolve_filter_spec(
                 source=source,
                 global_spec=global_filter_spec,
                 legacy_spec=legacy_filter_spec,
             )
-            for item in iter_source_items(source):
-                mapped = map_item_to_schema(
-                    item,
-                    source.name,
-                    source.fields or {},
-                    filter_spec,
-                    default_language,
-                )
-                if not mapped:
-                    continue
-                row, text_norm = mapped
-                text_hash = hash_text(text_norm)
-                if not row.get("doc_id"):
-                    row["doc_id"] = text_hash.hex()
-                pending.append((text_hash, row))
+            try:
+                for item in iter_source_items(source):
+                    mapped = map_item_to_schema(
+                        item,
+                        source.name,
+                        source.fields or {},
+                        filter_spec,
+                        default_language,
+                    )
+                    if not mapped:
+                        continue
+                    row, text_norm = mapped
+                    text_hash = hash_text(text_norm)
+                    if not row.get("doc_id"):
+                        row["doc_id"] = text_hash.hex()
+                    pending.append((text_hash, row))
 
-                if len(pending) >= 1000:
-                    new_pairs = store.filter_new(pending)
-                    pending = []
-                    for h, new_row in new_pairs:
-                        if h in out_hash_set:
-                            continue
-                        out_rows.append(new_row)
-                        out_hashes.append(h)
-                        out_hash_set.add(h)
+                    if len(pending) >= 1000:
+                        new_pairs = store.filter_new(pending)
+                        pending = []
+                        for h, new_row in new_pairs:
+                            if h in out_hash_set:
+                                continue
+                            out_rows.append(new_row)
+                            out_hashes.append(h)
+                            out_hash_set.add(h)
 
-                        if len(out_rows) >= batch_size:
-                            upload_parquet_batch(
-                                api=api,
-                                repo_id=repo_id,
-                                token=token,
-                                rows=out_rows[:batch_size],
-                                shard_index=shard_index,
-                            )
-                            store.insert_hashes(out_hashes[:batch_size])
-                            shard_index += 1
-                            uploaded_batches += 1
-                            out_rows = out_rows[batch_size:]
-                            out_hashes = out_hashes[batch_size:]
-                            out_hash_set = set(out_hashes)
+                            if len(out_rows) >= batch_size:
+                                upload_parquet_batch(
+                                    api=api,
+                                    repo_id=repo_id,
+                                    token=token,
+                                    rows=out_rows[:batch_size],
+                                    shard_index=shard_index,
+                                )
+                                store.insert_hashes(out_hashes[:batch_size])
+                                shard_index += 1
+                                uploaded_batches += 1
+                                out_rows = out_rows[batch_size:]
+                                out_hashes = out_hashes[batch_size:]
+                                out_hash_set = set(out_hashes)
 
-                            if max_batches and uploaded_batches >= max_batches:
-                                logger.info("Reached max_batches=%s. Stopping early.", max_batches)
-                                return
+                                if max_batches and uploaded_batches >= max_batches:
+                                    logger.info("Reached max_batches=%s. Stopping early.", max_batches)
+                                    return
+            except Exception as exc:
+                logger.warning("Failed source %s: %s", source.name, exc)
+                continue
 
             if pending:
                 new_pairs = store.filter_new(pending)
@@ -536,6 +642,12 @@ def merge_and_upload(
                     if max_batches and uploaded_batches >= max_batches:
                         logger.info("Reached max_batches=%s. Stopping early.", max_batches)
                         return
+
+            if cleanup_cache and source.kind == "hf" and source.repo:
+                cleanup_hf_cache(source.repo)
+
+            append_checkpoint(checkpoint_path, key)
+            done.add(key)
 
         if pending:
             new_pairs = store.filter_new(pending)
@@ -584,6 +696,12 @@ def main() -> None:
         action="append",
         help="Only process specific dataset(s) by source name or repo (can be repeated)",
     )
+    parser.add_argument("--inventory", help="Inventory JSONL path (from hf_inventory.py)")
+    parser.add_argument("--include-regex", help="Regex to include repos from inventory")
+    parser.add_argument("--exclude-regex", help="Regex to exclude repos from inventory")
+    parser.add_argument("--cleanup-cache", action="store_true", default=None, help="Delete HF cache per source")
+    parser.add_argument("--no-cleanup-cache", action="store_false", dest="cleanup_cache", default=None)
+    parser.add_argument("--checkpoint", default="data/hf_merge_done.txt", help="Checkpoint file to skip completed sources")
 
     args = parser.parse_args()
 
@@ -595,8 +713,25 @@ def main() -> None:
 
     raw_sources = config.get("sources") or []
     sources = parse_sources(raw_sources)
+
+    include_re = re.compile(args.include_regex) if args.include_regex else None
+    exclude_re = re.compile(args.exclude_regex) if args.exclude_regex else None
+    if args.inventory:
+        inventory_sources = load_inventory_sources(args.inventory, include_re, exclude_re)
+        if inventory_sources:
+            # Allow config sources to override inventory entries
+            merged = list(inventory_sources)
+            index = {(s.repo, s.config): i for i, s in enumerate(merged)}
+            for s in sources:
+                key = (s.repo, s.config)
+                if key in index:
+                    merged[index[key]] = s
+                else:
+                    merged.append(s)
+            sources = merged
+
     if not sources:
-        print("Error: No sources configured. Add `sources:` to the config.")
+        print("Error: No sources configured. Add `sources:` or provide --inventory.")
         sys.exit(1)
 
     if args.dataset:
@@ -618,6 +753,7 @@ def main() -> None:
     if global_filter_spec is None:
         legacy_filter_spec = build_legacy_filter_spec(options)
     default_language = options.get("default_language")
+    cleanup_cache = args.cleanup_cache if args.cleanup_cache is not None else options.get("cleanup_cache", True)
 
     dedupe_store = (
         args.dedupe_store
@@ -632,6 +768,9 @@ def main() -> None:
 
     login(token=token)
 
+    if cleanup_cache:
+        datasets.disable_caching()
+
     merge_and_upload(
         sources=sources,
         repo_id=target_repo,
@@ -644,6 +783,8 @@ def main() -> None:
         global_filter_spec=global_filter_spec,
         legacy_filter_spec=legacy_filter_spec,
         default_language=default_language,
+        cleanup_cache=cleanup_cache,
+        checkpoint_path=args.checkpoint,
     )
 
 
