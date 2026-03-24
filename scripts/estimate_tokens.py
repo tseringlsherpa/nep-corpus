@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -29,8 +30,12 @@ project_root = str(Path(__file__).resolve().parents[1])
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nepali_tokenizer.hf_utils import get_field_value
-from nepali_tokenizer.quality_filters import FilterSpec, normalize_text, passes_quality
+from scripts.merge_datasets.merge_corpus_to_hf import get_field_value
+from scripts.merge_datasets.quality_filters import (
+    FilterSpec,
+    normalize_text,
+    passes_quality,
+)
 
 
 logging.basicConfig(
@@ -198,6 +203,7 @@ def normalize_strata_key(values: List[str], fields: List[str]) -> str:
 
 
 def estimate_source(plan: SourcePlan, encoder) -> Dict[str, Any]:
+    start_t = time.perf_counter()
     total_rows = get_num_rows(plan.source_id, plan.config, plan.split)
     rows_seen = 0
     rows_kept = 0
@@ -300,7 +306,8 @@ def estimate_source(plan: SourcePlan, encoder) -> Dict[str, Any]:
                     "avg_tokens_per_row": avg_tok,
                 }
 
-    return {
+    elapsed = time.perf_counter() - start_t
+    stats = {
         "source_key": plan.source_key,
         "rows_seen": rows_seen,
         "rows_kept": rows_kept,
@@ -314,13 +321,20 @@ def estimate_source(plan: SourcePlan, encoder) -> Dict[str, Any]:
         "estimated_total_tokens": est_total_tokens,
         "stratify_fields": plan.stratify_by or None,
         "stratify": strata_estimates or None,
+        "elapsed_seconds": round(elapsed, 3),
     }
+    return stats
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Estimate token counts for HF datasets")
     parser.add_argument("--config", required=True, help="Path to sources config (YAML/JSON)")
     parser.add_argument("--output", help="Override output JSON path")
+    parser.add_argument(
+        "--full-scan",
+        action="store_true",
+        help="Force full scan for all sources (overrides config).",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -328,9 +342,21 @@ def main() -> None:
     encoder = load_encoder(encoder_name)
 
     plans = build_sources(cfg)
+    if args.full_scan:
+        plans = [
+            plan.__class__(
+                **{
+                    **plan.__dict__,
+                    "full_scan": True,
+                    "sample_rows": 0,
+                }
+            )
+            for plan in plans
+        ]
     out_path = args.output or cfg.get("stats_path", "data/token_estimates.json")
 
     results = {"sources": {}, "total": {}}
+    start_all = time.perf_counter()
     total_est = 0
     total_sample_tokens = 0
     for plan in plans:
@@ -344,6 +370,7 @@ def main() -> None:
     results["total"] = {
         "estimated_total_tokens": total_est or None,
         "sample_tokens": total_sample_tokens,
+        "elapsed_seconds": round(time.perf_counter() - start_all, 3),
     }
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
