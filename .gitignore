@@ -55,3 +55,6 @@ htmlcov/
 Thumbs.db
 .DS_Store
 EOF
+data/
+benchmarks/
+rust/url_dedup/target/
