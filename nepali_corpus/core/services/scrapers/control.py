@@ -1120,7 +1120,7 @@ class ScrapeCoordinator:
                     cache_dir=self._cache_dir,
                     ocr_enabled=self._ocr_enabled,
                     pdf_enabled=self._pdf_enabled,
-                    max_workers=1
+                    max_workers=20
                 )
             )
             
