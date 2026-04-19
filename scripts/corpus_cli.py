@@ -278,13 +278,11 @@ def cmd_coordinator(args: argparse.Namespace) -> None:
         loop = asyncio.get_running_loop()
 
         def _on_signal():
-            print("\n⚠️  Shutdown signal received — finishing in-flight jobs...")
+            print("\nShutdown signal received — finishing in-flight jobs...")
             coordinator.request_shutdown()
 
-        for sig in (signal.SIGTERM,):
+        for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, _on_signal)
-
-        loop.add_signal_handler(signal.SIGINT, lambda: print("\n Ctrl+C is disabled for safety! Background scraping will continue. To actually kill, use 'Ctrl+\\' or 'kill <pid>'."))
 
         try:
             if args.resume:
